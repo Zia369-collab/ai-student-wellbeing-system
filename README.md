@@ -1,1 +1,1 @@
-# ai-student-wellbeing-system
+# AI-Student-Wellbeing-System
