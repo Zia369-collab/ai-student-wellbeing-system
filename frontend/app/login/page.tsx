@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import {
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 
@@ -13,12 +16,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setError("");
+    setSuccess("");
 
     if (!email.trim()) {
       setError("Please enter your email address.");
@@ -43,11 +49,7 @@ export default function LoginPage() {
     } catch (error: unknown) {
       console.error(error);
 
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error
-      ) {
+      if (error && typeof error === "object" && "code" in error) {
         const firebaseError = error as { code: string };
 
         switch (firebaseError.code) {
@@ -78,10 +80,58 @@ export default function LoginPage() {
     }
   }
 
+  async function handleForgotPassword() {
+    setError("");
+    setSuccess("");
+
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail) {
+      setError("Please enter your email address first.");
+      return;
+    }
+
+    try {
+      setResettingPassword(true);
+
+      await sendPasswordResetEmail(auth, trimmedEmail);
+
+      setSuccess(
+        "Password reset email sent. Please check your inbox."
+      );
+    } catch (error: unknown) {
+      console.error(error);
+
+      if (error && typeof error === "object" && "code" in error) {
+        const firebaseError = error as { code: string };
+
+        switch (firebaseError.code) {
+          case "auth/invalid-email":
+            setError("Please enter a valid email address.");
+            break;
+
+          case "auth/user-not-found":
+            setError("No account was found with this email address.");
+            break;
+
+          default:
+            setError(
+              "Unable to send the password reset email. Please try again."
+            );
+        }
+      } else {
+        setError(
+          "Unable to send the password reset email. Please try again."
+        );
+      }
+    } finally {
+      setResettingPassword(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="grid min-h-screen lg:grid-cols-2">
-
         {/* Left side */}
         <section className="hidden bg-indigo-600 lg:flex lg:flex-col lg:justify-between lg:p-12">
           <div>
@@ -125,7 +175,6 @@ export default function LoginPage() {
         {/* Right side */}
         <section className="flex items-center justify-center px-6 py-12">
           <div className="w-full max-w-md">
-
             {/* Mobile logo */}
             <Link
               href="/"
@@ -141,7 +190,6 @@ export default function LoginPage() {
             </Link>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm sm:p-10">
-
               <div className="mb-8">
                 <h2 className="text-3xl font-bold tracking-tight text-slate-900">
                   Welcome back
@@ -153,7 +201,6 @@ export default function LoginPage() {
               </div>
 
               <form onSubmit={handleLogin} className="space-y-5">
-
                 {/* Email */}
                 <div>
                   <label
@@ -186,9 +233,13 @@ export default function LoginPage() {
 
                     <button
                       type="button"
-                      className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                      onClick={handleForgotPassword}
+                      disabled={resettingPassword}
+                      className="text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Forgot password?
+                      {resettingPassword
+                        ? "Sending..."
+                        : "Forgot password?"}
                     </button>
                   </div>
 
@@ -202,6 +253,16 @@ export default function LoginPage() {
                     className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                   />
                 </div>
+
+                {/* Success */}
+                {success && (
+                  <div
+                    role="status"
+                    className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+                  >
+                    {success}
+                  </div>
+                )}
 
                 {/* Error */}
                 {error && (
