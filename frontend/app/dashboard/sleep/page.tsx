@@ -17,6 +17,65 @@ type SleepEntry = {
   recorded_at: string;
 };
 
+const MAX_NOTE_LENGTH = 500;
+
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function calculateSleepDuration(bedtime: string, wakeTime: string) {
+  const bedtimeMinutes = timeToMinutes(bedtime);
+  let wakeMinutes = timeToMinutes(wakeTime);
+
+  if (wakeMinutes === bedtimeMinutes) {
+    return null;
+  }
+
+  if (wakeMinutes < bedtimeMinutes) {
+    wakeMinutes += 24 * 60;
+  }
+
+  const durationMinutes = wakeMinutes - bedtimeMinutes;
+
+  return Number((durationMinutes / 60).toFixed(1));
+}
+
+function buildDateTime(
+  sleepDate: string,
+  bedtime: string,
+  wakeTime: string
+) {
+  if (!sleepDate || !bedtime || !wakeTime) {
+    return {
+      bedtimeDateTime: bedtime
+        ? `${sleepDate}T${bedtime}:00`
+        : null,
+      wakeTimeDateTime: wakeTime
+        ? `${sleepDate}T${wakeTime}:00`
+        : null,
+    };
+  }
+
+  const bedtimeMinutes = timeToMinutes(bedtime);
+  const wakeMinutes = timeToMinutes(wakeTime);
+
+  const isOvernight = wakeMinutes < bedtimeMinutes;
+
+  const wakeDate = new Date(`${sleepDate}T00:00:00`);
+
+  if (isOvernight) {
+    wakeDate.setDate(wakeDate.getDate() + 1);
+  }
+
+  const nextWakeDate = wakeDate.toISOString().split("T")[0];
+
+  return {
+    bedtimeDateTime: `${sleepDate}T${bedtime}:00`,
+    wakeTimeDateTime: `${nextWakeDate}T${wakeTime}:00`,
+  };
+}
+
 export default function SleepPage() {
   const [user, setUser] = useState<User | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -53,6 +112,19 @@ export default function SleepPage() {
       loadSleepEntries();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (bedtime && wakeTime) {
+      const calculatedDuration = calculateSleepDuration(
+        bedtime,
+        wakeTime
+      );
+
+      if (calculatedDuration !== null) {
+        setDurationHours(calculatedDuration.toString());
+      }
+    }
+  }, [bedtime, wakeTime]);
 
   async function loadSleepEntries() {
     try {
@@ -96,23 +168,58 @@ export default function SleepPage() {
       return;
     }
 
+    if (bedtime && wakeTime) {
+      const calculatedDuration = calculateSleepDuration(
+        bedtime,
+        wakeTime
+      );
+
+      if (calculatedDuration === null) {
+        setError(
+          "Bedtime and wake-up time cannot be the same."
+        );
+        return;
+      }
+
+      if (calculatedDuration <= 0 || calculatedDuration > 24) {
+        setError(
+          "The calculated sleep duration must be between 0 and 24 hours."
+        );
+        return;
+      }
+    }
+
     if (!durationHours) {
-      setError("Please enter your sleep duration.");
+      setError(
+        "Please enter your sleep duration or provide both bedtime and wake-up time."
+      );
       return;
     }
 
     const duration = Number(durationHours);
 
-    if (duration <= 0 || duration > 24) {
+    if (
+      Number.isNaN(duration) ||
+      duration <= 0 ||
+      duration > 24
+    ) {
       setError("Sleep duration must be between 0 and 24 hours.");
       return;
     }
 
     if (
       sleepQuality &&
-      (Number(sleepQuality) < 1 || Number(sleepQuality) > 5)
+      (Number(sleepQuality) < 1 ||
+        Number(sleepQuality) > 5)
     ) {
       setError("Sleep quality must be between 1 and 5.");
+      return;
+    }
+
+    if (note.length > MAX_NOTE_LENGTH) {
+      setError(
+        `Your note must be ${MAX_NOTE_LENGTH} characters or fewer.`
+      );
       return;
     }
 
@@ -128,16 +235,18 @@ export default function SleepPage() {
 
       const token = await currentUser.getIdToken();
 
+      const dateTimes = buildDateTime(
+        sleepDate,
+        bedtime,
+        wakeTime
+      );
+
       await axios.post(
         "http://localhost:5000/api/sleep",
         {
           sleep_date: sleepDate,
-          bedtime: bedtime
-            ? `${sleepDate}T${bedtime}:00`
-            : null,
-          wake_time: wakeTime
-            ? `${sleepDate}T${wakeTime}:00`
-            : null,
+          bedtime: dateTimes.bedtimeDateTime,
+          wake_time: dateTimes.wakeTimeDateTime,
           duration_hours: duration,
           sleep_quality: sleepQuality
             ? Number(sleepQuality)
@@ -181,6 +290,7 @@ export default function SleepPage() {
       <main className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
+
           <p className="mt-4 text-sm text-slate-600">
             Checking your account...
           </p>
@@ -201,6 +311,7 @@ export default function SleepPage() {
             <p className="text-lg font-bold text-slate-900">
               MindTrack AI
             </p>
+
             <p className="text-xs text-slate-500">
               Student Wellbeing & Productivity
             </p>
@@ -226,7 +337,8 @@ export default function SleepPage() {
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
-            Record your sleep patterns and monitor your sleep quality over time.
+            Record your sleep patterns and monitor your sleep quality
+            over time.
           </p>
         </div>
 
@@ -252,95 +364,148 @@ export default function SleepPage() {
               Add your latest sleep information.
             </p>
 
-            <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+            <form
+              onSubmit={handleSubmit}
+              className="mt-6 space-y-5"
+            >
               <div>
-                <label className="block text-sm font-medium text-slate-700">
+                <label
+                  htmlFor="sleep-date"
+                  className="block text-sm font-medium text-slate-700"
+                >
                   Sleep date
                 </label>
 
                 <input
+                  id="sleep-date"
                   type="date"
                   value={sleepDate}
                   onChange={(e) => setSleepDate(e.target.value)}
-                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                 />
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">
+                  <label
+                    htmlFor="bedtime"
+                    className="block text-sm font-medium text-slate-700"
+                  >
                     Bedtime
                   </label>
 
                   <input
+                    id="bedtime"
                     type="time"
                     value={bedtime}
                     onChange={(e) => setBedtime(e.target.value)}
-                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">
+                  <label
+                    htmlFor="wake-time"
+                    className="block text-sm font-medium text-slate-700"
+                  >
                     Wake-up time
                   </label>
 
                   <input
+                    id="wake-time"
                     type="time"
                     value={wakeTime}
                     onChange={(e) => setWakeTime(e.target.value)}
-                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                   />
                 </div>
               </div>
 
+              {bedtime && wakeTime && (
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3">
+                  <p className="mt-1 text-sm text-indigo-900">
+                    Your sleep duration is{" "}
+                    <span className="font-bold">
+                      {durationHours || "calculating..."} hours
+                    </span>
+                  </p>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-slate-700">
+                <label
+                  htmlFor="duration"
+                  className="block text-sm font-medium text-slate-700"
+                >
                   Sleep duration (hours)
                 </label>
 
                 <input
+                  id="duration"
                   type="number"
                   min="0.1"
                   max="24"
                   step="0.1"
                   value={durationHours}
-                  onChange={(e) => setDurationHours(e.target.value)}
+                  onChange={(e) =>
+                    setDurationHours(e.target.value)
+                  }
                   placeholder="e.g. 7.5"
-                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">
+                <label
+                  htmlFor="sleep-quality"
+                  className="block text-sm font-medium text-slate-700"
+                >
                   Sleep quality
                 </label>
 
                 <select
+                  id="sleep-quality"
                   value={sleepQuality}
-                  onChange={(e) => setSleepQuality(e.target.value)}
-                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  onChange={(e) =>
+                    setSleepQuality(e.target.value)
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                 >
                   <option value="">Select quality</option>
-                  <option value="1">1 — Very poor</option>
-                  <option value="2">2 — Poor</option>
-                  <option value="3">3 — Average</option>
-                  <option value="4">4 — Good</option>
-                  <option value="5">5 — Excellent</option>
+                  <option value="1">1 - Very poor</option>
+                  <option value="2">2 - Poor</option>
+                  <option value="3">3 - Average</option>
+                  <option value="4">4 - Good</option>
+                  <option value="5">5 - Excellent</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700">
-                  Note
-                </label>
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="sleep-note"
+                    className="block text-sm font-medium text-slate-700"
+                  >
+                    Note
+                  </label>
+
+                  <span className="text-xs text-slate-400">
+                    {note.length}/{MAX_NOTE_LENGTH}
+                  </span>
+                </div>
 
                 <textarea
+                  id="sleep-note"
                   value={note}
-                  onChange={(e) => setNote(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value.length <= MAX_NOTE_LENGTH) {
+                      setNote(e.target.value);
+                    }
+                  }}
                   rows={4}
                   placeholder="How did you sleep?"
-                  className="mt-2 w-full resize-none rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  maxLength={MAX_NOTE_LENGTH}
+                  className="mt-2 w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                 />
               </div>
 
@@ -366,6 +531,7 @@ export default function SleepPage() {
             {loadingEntries ? (
               <div className="mt-8 text-center">
                 <div className="mx-auto h-7 w-7 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
+
                 <p className="mt-3 text-sm text-slate-500">
                   Loading your records...
                 </p>
@@ -373,9 +539,11 @@ export default function SleepPage() {
             ) : entries.length === 0 ? (
               <div className="mt-8 rounded-xl bg-slate-50 p-6 text-center">
                 <div className="text-4xl">😴</div>
+
                 <p className="mt-3 text-sm font-medium text-slate-700">
                   No sleep records yet
                 </p>
+
                 <p className="mt-1 text-xs text-slate-500">
                   Add your first sleep record using the form.
                 </p>
@@ -402,9 +570,12 @@ export default function SleepPage() {
                         <p className="text-xs text-slate-400">
                           Bedtime
                         </p>
+
                         <p className="mt-1 text-slate-700">
                           {entry.bedtime
-                            ? new Date(entry.bedtime).toLocaleTimeString([], {
+                            ? new Date(
+                                entry.bedtime
+                              ).toLocaleTimeString([], {
                                 hour: "2-digit",
                                 minute: "2-digit",
                               })
@@ -416,9 +587,12 @@ export default function SleepPage() {
                         <p className="text-xs text-slate-400">
                           Wake-up
                         </p>
+
                         <p className="mt-1 text-slate-700">
                           {entry.wake_time
-                            ? new Date(entry.wake_time).toLocaleTimeString([], {
+                            ? new Date(
+                                entry.wake_time
+                              ).toLocaleTimeString([], {
                                 hour: "2-digit",
                                 minute: "2-digit",
                               })
